@@ -31,6 +31,8 @@ interface ExerciseCardProps {
   dayId: string;
   unit: 'kg' | 'lbs';
   settings?: AppSettings;
+  isCollapsed?: boolean;
+  onToggleCollapse?: (exerciseId: string) => void;
   previousPerformance?: {
     weight: number;
     reps: number;
@@ -70,6 +72,8 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   dayId,
   unit,
   settings,
+  isCollapsed,
+  onToggleCollapse,
   previousPerformance,
   onSavePerformance,
   onRenameExercise,
@@ -83,6 +87,17 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
   const [isTrackerOpen, setIsTrackerOpen] = useState<boolean>(false);
   const [isWarmupOpen, setIsWarmupOpen] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [internalCollapsed, setInternalCollapsed] = useState<boolean>(false);
+
+  const isCardCollapsed = isCollapsed !== undefined ? isCollapsed : internalCollapsed;
+
+  const handleToggleCardCollapse = () => {
+    if (onToggleCollapse) {
+      onToggleCollapse(exercise.id);
+    } else {
+      setInternalCollapsed((prev) => !prev);
+    }
+  };
 
   const isAmoled = settings?.amoledBlack === true;
   const isHighContrast = settings?.highContrastBorders === true;
@@ -420,10 +435,102 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
           >
             <Trash2 className="w-4 h-4" />
           </button>
+
+          {/* Toggle Collapse/Expand Button */}
+          <button
+            type="button"
+            onClick={handleToggleCardCollapse}
+            className={`px-2.5 py-2 rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+              isCardCollapsed
+                ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40 shadow-xs'
+                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/80'
+            }`}
+            title={isCardCollapsed ? 'Rozwiń szczegóły ćwiczenia' : 'Zwiń ćwiczenie do kompaktowego paska'}
+            id={`btn-collapse-${exercise.id}`}
+          >
+            {isCardCollapsed ? (
+              <>
+                <span className="text-xs font-bold text-emerald-400">Rozwiń</span>
+                <ChevronDown className="w-4 h-4 text-emerald-400" />
+              </>
+            ) : (
+              <>
+                <span className="text-xs font-bold text-slate-300">Zwiń</span>
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* 2. Interactive Parameters Strip (Weight, Sets, Reps) */}
+      {/* Widok zwinięty (Kompaktowy pasek podsumowania) */}
+      {isCardCollapsed ? (
+        <div 
+          onClick={handleToggleCardCollapse}
+          className="pt-2.5 mt-0.5 border-t border-slate-800/70 flex flex-wrap items-center justify-between gap-2.5 cursor-pointer hover:bg-slate-900/30 -mx-1 px-1 rounded-xl transition-colors group"
+        >
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Parametry ćwiczenia: Ciężar, serie, powtórzenia */}
+            <div className="flex items-center gap-2 bg-slate-950/90 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-mono shadow-inner">
+              <Dumbbell className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="font-black text-emerald-400">{weight} {unit}</span>
+              <span className="text-slate-600 font-bold">•</span>
+              <span className="text-slate-200 font-bold">{sets} s</span>
+              <span className="text-slate-600 font-bold">•</span>
+              <span className="text-slate-200 font-bold">{reps} p</span>
+            </div>
+
+            {/* Szybkie bąbelki serii roboczych (klikalne bezpośrednio w stanie zwiniętym!) */}
+            <div 
+              className="flex items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {detailedSets.map((s, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => toggleSetComplete(idx)}
+                  className={`min-h-[30px] px-2 rounded-lg font-mono text-[11px] font-bold border transition-all flex items-center gap-1 cursor-pointer active:scale-90 ${
+                    s.completed
+                      ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/60 shadow-xs ring-1 ring-emerald-500/20'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                  title={`Seria ${idx + 1}: ${s.weight} ${unit} × ${s.reps} powt. - Kliknij, aby ${s.completed ? 'odznaczyć' : 'zaliczyć'}`}
+                >
+                  {s.completed ? (
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                  ) : (
+                    <Circle className="w-3 h-3 text-slate-600 shrink-0" />
+                  )}
+                  <span>S{idx + 1}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Status zaliczenia i wskazówka kliknięcia */}
+          <div className="flex items-center gap-2 ml-auto">
+            <span className={`text-[11px] font-mono font-bold px-2.5 py-1 rounded-xl border ${
+              isFullyCompleted
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                : completedSetsCount > 0
+                ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                : 'bg-slate-900/80 text-slate-400 border-slate-800'
+            }`}>
+              {isFullyCompleted 
+                ? '🔥 Wszystkie serie zaliczone' 
+                : `${completedSetsCount}/${detailedSets.length} serii`}
+            </span>
+
+            <span className="text-[11px] font-semibold text-slate-500 group-hover:text-emerald-400 transition-colors flex items-center gap-1">
+              <span className="hidden sm:inline">Kliknij, aby rozwinąć</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-400" />
+            </span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* 2. Interactive Parameters Strip (Weight, Sets, Reps) */}
       <div className={`${
         isAmoled ? 'bg-zinc-950 border-zinc-800' : 'bg-slate-950/80 border-slate-800/80'
       } border ${cardRadiusClass} ${
@@ -823,6 +930,8 @@ export const ExerciseCard: React.FC<ExerciseCardProps> = ({
             ))}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

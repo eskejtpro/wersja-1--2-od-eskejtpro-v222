@@ -14,7 +14,9 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
-  Pencil
+  Pencil,
+  FoldVertical,
+  UnfoldVertical
 } from 'lucide-react';
 import { TrainingWeek, TrainingDay, Exercise, LoggedSet, AppSettings } from '../types';
 import { calculateVolume } from '../utils/calculations';
@@ -131,6 +133,59 @@ export const WorkoutPlanView: React.FC<WorkoutPlanViewProps> = ({
     return acc + (ex.loggedSets ? ex.loggedSets.filter((s) => s.completed).length : 0);
   }, 0);
   const dayProgressPercent = totalPlannedSets > 0 ? Math.round((totalCompletedSets / totalPlannedSets) * 100) : 0;
+
+  // Zwijanie / Rozwijanie ćwiczeń (per-ćwiczenie oraz globalnie) z pamięcią w localStorage
+  const [collapsedExerciseIds, setCollapsedExerciseIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('gymtracker_collapsed_exercises');
+      if (saved) {
+        return new Set(JSON.parse(saved));
+      }
+    } catch {}
+    return new Set();
+  });
+
+  const persistCollapsed = (nextSet: Set<string>) => {
+    try {
+      localStorage.setItem('gymtracker_collapsed_exercises', JSON.stringify(Array.from(nextSet)));
+    } catch {}
+  };
+
+  const handleToggleExerciseCollapse = (exerciseId: string) => {
+    setCollapsedExerciseIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(exerciseId)) {
+        next.delete(exerciseId);
+      } else {
+        next.add(exerciseId);
+      }
+      persistCollapsed(next);
+      return next;
+    });
+  };
+
+  const dayExerciseIds = dayExercises.map((e) => e.id);
+  const allCollapsed = dayExerciseIds.length > 0 && dayExerciseIds.every((id) => collapsedExerciseIds.has(id));
+  const noneCollapsed = dayExerciseIds.length > 0 && dayExerciseIds.every((id) => !collapsedExerciseIds.has(id));
+  const collapsedCountInDay = dayExerciseIds.filter((id) => collapsedExerciseIds.has(id)).length;
+
+  const handleCollapseAll = () => {
+    setCollapsedExerciseIds((prev) => {
+      const next = new Set(prev);
+      dayExerciseIds.forEach((id) => next.add(id));
+      persistCollapsed(next);
+      return next;
+    });
+  };
+
+  const handleExpandAll = () => {
+    setCollapsedExerciseIds((prev) => {
+      const next = new Set(prev);
+      dayExerciseIds.forEach((id) => next.delete(id));
+      persistCollapsed(next);
+      return next;
+    });
+  };
 
   // Week completed days count
   const weekCompletedDaysCount = currentWeek?.days.filter((d) => d.completed).length || 0;
@@ -558,16 +613,57 @@ export const WorkoutPlanView: React.FC<WorkoutPlanViewProps> = ({
 
         {/* 4. Exercises List Section */}
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-emerald-400" />
-              <span>Lista Ćwiczeń ({dayExercises.length})</span>
-            </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-emerald-400" />
+                <span>Lista Ćwiczeń ({dayExercises.length})</span>
+              </h3>
+
+              {dayExercises.length > 0 && (
+                <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-xl p-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={handleCollapseAll}
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 ${
+                      allCollapsed
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title="Zwiń wszystkie ćwiczenia w tym dniu (kompaktowy widok listy)"
+                    id="btn-collapse-all-exercises"
+                  >
+                    <FoldVertical className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Zwiń wszystkie</span>
+                    {collapsedCountInDay > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 font-mono">
+                        {collapsedCountInDay}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExpandAll}
+                    className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 ${
+                      noneCollapsed
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-xs'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title="Rozwiń wszystkie ćwiczenia w tym dniu (pełny widok parametrów i serii)"
+                    id="btn-expand-all-exercises"
+                  >
+                    <UnfoldVertical className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Rozwiń wszystkie</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             <button
               type="button"
               onClick={onOpenAddExerciseModal}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors"
+              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 border border-slate-800 hover:border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
               id="btn-add-exercise-list-top"
             >
               <Plus className="w-4 h-4" />
@@ -587,7 +683,7 @@ export const WorkoutPlanView: React.FC<WorkoutPlanViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenAddExerciseModal}
-                className="mt-4 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
+                className="mt-4 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Dodaj pierwsze ćwiczenie</span>
@@ -603,6 +699,8 @@ export const WorkoutPlanView: React.FC<WorkoutPlanViewProps> = ({
                   weekId={currentWeek.id}
                   dayId={currentDay.id}
                   unit={unit}
+                  isCollapsed={collapsedExerciseIds.has(exercise.id)}
+                  onToggleCollapse={handleToggleExerciseCollapse}
                   previousPerformance={getPreviousPerformance(exercise)}
                   onSavePerformance={onSaveExercisePerformance}
                   onRenameExercise={onRenameExercise}
