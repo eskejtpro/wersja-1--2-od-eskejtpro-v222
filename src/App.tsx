@@ -1465,7 +1465,7 @@ export default function App() {
           />
 
         {/* View Switcher Container */}
-        <main className={`flex-1 overflow-y-auto flex flex-col pb-[max(5.5rem,calc(4.5rem+env(safe-area-inset-bottom)))] md:pb-0 ${
+        <main className={`flex-1 overflow-y-auto flex flex-col pb-[max(6.75rem,calc(5.75rem+env(safe-area-inset-bottom)))] md:pb-0 ${
           isAmoled ? 'bg-black' : isDark ? 'bg-slate-950 bg-mesh-3d' : 'bg-slate-50'
         }`}>
           {activeView === 'quick_access' && (
@@ -1607,6 +1607,7 @@ export default function App() {
               onDeleteCalendarNote={handleDeleteCalendarNote}
               onUpdateWeekStartDate={handleUpdateWeekStartDate}
               onAddWeekFromGap={handleAddWeekFromGap}
+              onAddBodyWeight={handleAddBodyWeight}
             />
           )}
 
@@ -1771,7 +1772,7 @@ export default function App() {
 
       {/* Android Floating Action Button (FAB) if enabled */}
       {data.settings.floatingActionButton && data.settings.floatingActionButton !== 'none' && (
-        <div className="fixed bottom-20 right-4 z-30 md:hidden animate-bounce-short">
+        <div className="fixed bottom-[max(5.75rem,calc(5.25rem+env(safe-area-inset-bottom,0px)))] right-4 z-30 md:hidden animate-bounce-short">
           {data.settings.floatingActionButton === 'timer' && (
             <button
               type="button"

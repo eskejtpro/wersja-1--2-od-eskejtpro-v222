@@ -90,7 +90,7 @@ export const ActiveWorkoutBar: React.FC<ActiveWorkoutBarProps> = ({
         isDark 
           ? 'bg-slate-900/95 border-emerald-500/30 text-slate-100' 
           : 'bg-white/95 border-emerald-300 text-slate-800'
-      } bottom-[calc(3.75rem+env(safe-area-inset-bottom))] md:bottom-0 md:max-w-4xl md:mx-auto md:rounded-t-2xl md:border-x`}
+      } bottom-[calc(5rem+env(safe-area-inset-bottom))] md:bottom-0 md:max-w-4xl md:mx-auto md:rounded-t-2xl md:border-x`}
       id="active-live-workout-bar"
     >
       {/* 1. Rest Timer Progress Ribbon (gdy timer jest aktywny) */}

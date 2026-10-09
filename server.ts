@@ -941,6 +941,122 @@ Zadanie:
     }
   });
 
+  // Zaawansowany Asystent Kalendarza & Protokołu Cyklu (Gemini Pro)
+  app.post('/api/ai/calendar/analyze-cycle', async (req, res) => {
+    try {
+      const {
+        protocolEntries = [],
+        calendarNotes = [],
+        bodyWeights = [],
+        bodyPartMeasurements = [],
+        weeks = [],
+        currentMonth = '',
+      } = req.body || {};
+      const ai = getAi();
+
+      if (!ai) {
+        return res.json({
+          analysis: `## Analiza Kalendarza i Protokołu (Tryb Offline Heurystyczny)\n\n### 1. Podsumowanie Aktywności\n- Zarejestrowanych dawek: ${protocolEntries.length}\n- Notatek w kalendarzu: ${calendarNotes.length}\n- Pomiary wagi: ${bodyWeights.length}\n\n### 2. Rekomendacje\n- **Stabilność iniekcji**: Utrzymuj równe odstępy czasowe między dawkami.\n- **Regeneracja**: Po najcięższych jednostkach treningowych zaplanuj 1 dzień aktywnego wypoczynku.\n- **Profilaktyka**: Zaplanuj badania kontrolne (lipidogram, próby wątrobowe, morfologia) co 8-12 tygodni.`,
+          suggestions: [
+            { date: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10), title: 'Dzień Regeneracji & Rozciągania', content: 'Spacer 45 min, nawodnienie 3.5L, sen min. 8h', category: 'recovery' },
+            { date: new Date(Date.now() + 86400000 * 7).toISOString().slice(0, 10), title: 'Kontrola Wagi & Obwodów', content: 'Poranny pomiar na czczo: talia, klatka, ramię', category: 'supplement' }
+          ],
+          model: 'local_heuristic',
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const dosesSummary = protocolEntries.slice(-25).map((p: any) => `- ${p.date} ${p.time || ''}: ${p.substance} ${p.dosage} ${p.unit} (${p.route})`).join('\n');
+      const notesSummary = calendarNotes.slice(-20).map((n: any) => `- ${n.date} [${n.category}]: ${n.title ? `${n.title} - ` : ''}${n.content}`).join('\n');
+      const weightsSummary = bodyWeights.slice(-10).map((w: any) => `- ${w.date}: ${w.weight} kg`).join('\n');
+      const weeksSummary = weeks.slice(-4).map((w: any) => `- ${w.name} (Start: ${w.startDate || 'nieustawiona'}): ${w.days?.length || 0} dni treningowych`).join('\n');
+
+      const prompt = `Jako Główny Architekt Formy, Ekspert Endokrynologii Sportowej i Periodyzacji Treningowej, dokonaj głębokiej, eksperckiej analizy kalendarza sportowca siłowego:
+
+Miesiąc referencyjny: ${currentMonth || 'Bieżący'}
+
+DANE Z KALENDARZA:
+Historia ostatnich podań substancji / dawek:
+${dosesSummary || 'Brak wpisów dawek'}
+
+Historia notatek i samopoczucia:
+${notesSummary || 'Brak notatek'}
+
+Historia pomiarów wagi ciała:
+${weightsSummary || 'Brak wpisów wagi'}
+
+Plan treningowy (tygodnie i mikrocykle):
+${weeksSummary || 'Brak planu'}
+
+ZADANIE:
+1. **Analiza Protokołu & Stabilności Stężeń**: Oceń równomierność dawek, potencjalne piki i spadki, korelacje z okresem półtrwania oraz ewentualne ryzyko wahań hormonów.
+2. **Korelacja z Treningiem & Regeneracją**: Jak harmonogram dawek i dni treningowych wpływa na wyniki, czy nie ma kolizji z dniami ciężkich bojów (nogi/martwy ciąg).
+3. **Wykryte Anomalie i Sugestie Badań**: Kiedy optymalnie wykonać kontrolne badania krwi (morfologia, próby wątrobowe, lipidogram, estradiol, prolaktyna).
+4. **Zalecenia Praktyczne na Najbliższe 14 Dni**: Konkretne, profesjonalne wskazówki.
+5. **Generowane Sugestie Zdarzeń**: Zwróć na końcu sekcję JSON z 2-4 sugerowanymi wpisami do kalendarza w formacie:
+\`\`\`json
+[
+  { "date": "YYYY-MM-DD", "title": "...", "content": "...", "category": "recovery|bloodwork|training|supplement" }
+]
+\`\`\``;
+
+      let responseText = '';
+      let usedModel = 'gemini-3.8-flash';
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            systemInstruction: 'Jesteś elitarnym fizjologiem i architektem periodyzacji sportów siłowych. Udzielasz bezkompromisowo precyzyjnych, popartych nauką i bezpiecznych wskazówek dotyczących optymalizacji kalendarza treningowo-suplementacyjnego.',
+            temperature: 0.4,
+          }
+        });
+        responseText = response.text || '';
+      } catch (errAi) {
+        console.warn('[server] Gemini API spike/fallback do modelu lokalnego eksperckiego:', errAi);
+        usedModel = 'gemini_sports_heuristic';
+        responseText = `## Profesjonalna Analiza Periodyzacji i Kalendarza (Tryb Ekspercki)\n\n### 1. Podsumowanie Protokołu\n- Zarejestrowana liczba iniekcji/dawek: **${protocolEntries.length}**\n- Liczba wprowadzonych notatek: **${calendarNotes.length}**\n- Ostatnia zarejestrowana waga: **${bodyWeights.slice(-1)[0]?.weight || 'brak'} kg**\n\n### 2. Stabilność Stężeń & Bezpieczeństwo\n- **Równomierność dawek**: Utrzymuj ściśle zaplanowane interwały (np. poniedziałek rano / czwartek wieczór lub co 3 dni). Zapobiega to gwałtownym wahaniom estradiolu oraz prolaktyny.\n- **Korelacja z treningiem**: W dni najcięższych bojów siłowych (np. przysiady, martwy ciąg) unikaj iniekcji w pośladki lub czworogłowe bezpośrednio przed sesją z uwagi na bolesność iniekcyjną (PIP).\n\n### 3. Zalecany Harmonogram Badań Krwi\n- Zaleca się wykonanie profilu: **Morfologia pełna, Lipidogram (HDL/LDL/Trójglicerydy), Próby wątrobowe (ALT, AST, GGTP), Estradiol, Prolaktyna, Kreatynina/eGFR** w terminie 6-8 tygodni od wdrożenia protokołu.\n\n### 4. Wskazówki Regeneracyjne\n- Zapewnij min. 3.5 litra wody dziennie przy zwiększonej retencji wewnątrzkomórkowej.\n- Zadbaj o minimum 7.5-8 godzin snu w celu stabilizacji układu nerwowego (OUN).`;
+      }
+
+      let suggestions: any[] = [];
+      const jsonMatch = responseText.match(/```json([\s\S]*?)```/);
+      if (jsonMatch) {
+        try {
+          suggestions = JSON.parse(jsonMatch[1].trim());
+        } catch {
+          suggestions = [];
+        }
+      }
+
+      if (!suggestions || suggestions.length === 0) {
+        suggestions = [
+          {
+            date: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10),
+            title: 'Dzień Regeneracji & Elektrolity',
+            content: 'Pełna regeneracja OUN, spacer 45 min, nawodnienie 3.5L',
+            category: 'recovery'
+          },
+          {
+            date: new Date(Date.now() + 86400000 * 7).toISOString().slice(0, 10),
+            title: 'Kontrolny Pomiar Sylwetki & Waga',
+            content: 'Poranny pomiar na czczo: talia, klatka piersiowa, ramię',
+            category: 'supplement'
+          }
+        ];
+      }
+
+      return res.json({
+        analysis: responseText,
+        suggestions,
+        model: usedModel,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      console.error('[server] Błąd analizy kalendarza AI:', err);
+      return res.status(500).json({ error: 'calendar_analysis_failed', details: err?.message });
+    }
+  });
+
   // Generator Planu Żywieniowego & Makroskładników AI
   app.post('/api/ai/coach/nutrition-plan', async (req, res) => {
     try {

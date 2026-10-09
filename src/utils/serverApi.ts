@@ -231,3 +231,56 @@ export async function logoutGoogleAccount(): Promise<void> {
   }
 }
 
+export interface CalendarCycleAnalysisResult {
+  analysis: string;
+  suggestions?: Array<{
+    date: string;
+    title: string;
+    content: string;
+    category: 'recovery' | 'bloodwork' | 'training' | 'supplement';
+  }>;
+  model: string;
+  timestamp: string;
+}
+
+export async function analyzeCalendarCycleWithGemini(payload: {
+  protocolEntries: any[];
+  calendarNotes: any[];
+  bodyWeights: any[];
+  bodyPartMeasurements: any[];
+  weeks: any[];
+  currentMonth: string;
+}): Promise<CalendarCycleAnalysisResult> {
+  try {
+    const res = await fetch('/api/ai/calendar/analyze-cycle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(35000),
+    });
+    if (!res.ok) throw new Error('ai_request_failed');
+    return await res.json();
+  } catch (err) {
+    console.warn('[serverApi] Fallback lokalny dla analizy kalendarza AI:', err);
+    return {
+      analysis: `## Podsumowanie Protokołu i Harmonogramu (Tryb Offline)\n\n- Zarejestrowanych dawek w bazie: ${payload.protocolEntries.length}\n- Notatek i celów: ${payload.calendarNotes.length}\n- Tygodni treningowych: ${payload.weeks.length}\n\n### Zalecenia periodyzacji:\n1. Zadbaj o stabilność interwałów podawania środków.\n2. W dni najcięższych treningów unikaj nakładania procedur iniekcyjnych w te same partie mięśniowe.\n3. Zaplanuj regularne badania kontrolne krwi co 8-10 tygodni.`,
+      suggestions: [
+        {
+          date: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10),
+          title: 'Regeneracja OUN & Sen',
+          content: 'Min. 8h snu, nawodnienie elektrolitami, brak ciężkiego treningu.',
+          category: 'recovery'
+        },
+        {
+          date: new Date(Date.now() + 86400000 * 7).toISOString().slice(0, 10),
+          title: 'Pomiary & Waga na czczo',
+          content: 'Kontrola postępów: talia, ramię, udo, poranna waga.',
+          category: 'supplement'
+        }
+      ],
+      model: 'local_heuristic_fallback',
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+

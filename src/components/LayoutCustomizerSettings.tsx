@@ -1056,9 +1056,9 @@ export const LayoutCustomizerSettings: React.FC<LayoutCustomizerSettingsProps> =
                 <span className="text-xs font-bold text-slate-200">Wysokość Paska Dolnego:</span>
                 <div className="grid grid-cols-3 gap-1.5">
                   {[
-                    { id: 'compact', label: '42px' },
-                    { id: 'standard', label: '48px' },
-                    { id: 'large', label: '56px' },
+                    { id: 'compact', label: '52px' },
+                    { id: 'standard', label: '66px' },
+                    { id: 'large', label: '74px' },
                   ].map((bh) => (
                     <button
                       key={bh.id}

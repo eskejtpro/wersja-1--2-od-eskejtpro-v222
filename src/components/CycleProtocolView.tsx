@@ -27,7 +27,14 @@ import {
   Palette,
   Edit2,
   Check,
-  Dumbbell
+  Dumbbell,
+  Bot,
+  Wand2,
+  RefreshCw,
+  Sliders,
+  X,
+  CalendarRange,
+  CheckCheck
 } from 'lucide-react';
 import { 
   ProtocolEntry, 
@@ -39,6 +46,7 @@ import {
 } from '../types';
 import { BloodConcentrationCalculator } from './BloodConcentrationCalculator';
 import { BODY_PART_CONFIG } from '../utils/bodyMeasurements';
+import { analyzeCalendarCycleWithGemini, CalendarCycleAnalysisResult } from '../utils/serverApi';
 
 interface CycleProtocolViewProps {
   protocolEntries: ProtocolEntry[];
@@ -54,6 +62,7 @@ interface CycleProtocolViewProps {
   onDeleteCalendarNote?: (id: string) => void;
   onUpdateWeekStartDate?: (weekId: string, startDate: string) => void;
   onAddWeekFromGap?: (startDate: string, weekNumber: number) => void;
+  onAddBodyWeight?: (entry: Omit<BodyWeightEntry, 'id'>) => void;
 }
 
 export const CALENDAR_COLOR_PALETTE = [
@@ -102,7 +111,8 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
   onUpdateCalendarNote,
   onDeleteCalendarNote,
   onUpdateWeekStartDate,
-  onAddWeekFromGap
+  onAddWeekFromGap,
+  onAddBodyWeight
 }) => {
   const isDark = settings.theme === 'dark';
   const [activeTab, setActiveTab] = useState<'calendar' | 'weeks' | 'calculator'>('calendar');
@@ -111,11 +121,11 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [selectedDateStr, setSelectedDateStr] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // Calendar display filter: all vs doses vs notes vs measurements
-  const [calendarFilter, setCalendarFilter] = useState<'all' | 'doses' | 'notes' | 'measurements'>('all');
+  // Calendar display filter: all vs doses vs notes vs measurements vs workouts
+  const [calendarFilter, setCalendarFilter] = useState<'all' | 'doses' | 'notes' | 'measurements' | 'workouts'>('all');
 
-  // Right action panel mode: 'dose' vs 'note'
-  const [rightPanelMode, setRightPanelMode] = useState<'dose' | 'note'>('dose');
+  // Right action panel mode: 'dose' vs 'note' vs 'weight'
+  const [rightPanelMode, setRightPanelMode] = useState<'dose' | 'note' | 'weight'>('dose');
 
   // Bottom table mode: doses log vs notes log vs combined correlation log
   const [bottomTableMode, setBottomTableMode] = useState<'doses' | 'notes' | 'correlation'>('doses');
@@ -135,6 +145,27 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
   const [noteCategory, setNoteCategory] = useState<typeof NOTE_CATEGORIES[number]['id']>('general');
   const [noteColor, setNoteColor] = useState<typeof CALENDAR_COLOR_PALETTE[number]['id']>('emerald');
   const [noteIsImportant, setNoteIsImportant] = useState(false);
+
+  // Form State: Quick Body Weight in Calendar Day
+  const [quickWeight, setQuickWeight] = useState('');
+  const [quickWeightNotes, setQuickWeightNotes] = useState('Poranny pomiar na czczo');
+
+  // AI Assistant Gemini 3.8 Pro / 3.1 Pro States
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState(false);
+  const [aiAnalysisResult, setAiAnalysisResult] = useState<CalendarCycleAnalysisResult | null>(null);
+
+  // Cycle Schedule Generator Modal States
+  const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState(false);
+  const [scheduleSubstance, setScheduleSubstance] = useState('Testosteron Enanthat');
+  const [scheduleDosage, setScheduleDosage] = useState('250');
+  const [scheduleUnit, setScheduleUnit] = useState<'mg' | 'IU' | 'mcg'>('mg');
+  const [scheduleRoute, setScheduleRoute] = useState<'IM' | 'SC' | 'Oral'>('IM');
+  const [scheduleFrequency, setScheduleFrequency] = useState<'e3d' | 'e3.5d' | 'eod' | 'daily' | 'e7d'>('e3.5d');
+  const [scheduleStartDate, setScheduleStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [scheduleWeeksCount, setScheduleWeeksCount] = useState<number>(8);
+  const [scheduleColor, setScheduleColor] = useState<typeof CALENDAR_COLOR_PALETTE[number]['id']>('emerald');
+  const [scheduleSuccessMsg, setScheduleSuccessMsg] = useState<string | null>(null);
 
   // Search & Filter state
   const [searchFilter, setSearchFilter] = useState('');
@@ -341,6 +372,153 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
     setNoteIsImportant(false);
   };
 
+  // Submit quick body weight from day panel
+  const handleAddQuickWeight = (e: React.FormEvent) => {
+    e.preventDefault();
+    const numWeight = parseFloat(quickWeight.replace(',', '.'));
+    if (!numWeight || numWeight <= 0) return;
+
+    onAddBodyWeight?.({
+      date: selectedDateStr,
+      weight: numWeight,
+      notes: quickWeightNotes.trim() || '',
+    });
+
+    setQuickWeight('');
+  };
+
+  // Run deep Gemini 3.8 Pro / 3.1 Pro analysis
+  const handleRunGeminiAnalysis = async () => {
+    setIsAiAnalyzing(true);
+    setIsAiModalOpen(true);
+    try {
+      const result = await analyzeCalendarCycleWithGemini({
+        protocolEntries,
+        calendarNotes,
+        bodyWeights,
+        bodyPartMeasurements,
+        weeks,
+        currentMonth: `${monthNames[month]} ${year}`
+      });
+      setAiAnalysisResult(result);
+    } catch (err) {
+      console.error('Błąd analizy Gemini:', err);
+    } finally {
+      setIsAiAnalyzing(false);
+    }
+  };
+
+  // Generate recurring doses schedule
+  const handleConfirmSchedule = () => {
+    const numDose = parseFloat(scheduleDosage) || 0;
+    if (numDose <= 0 || !scheduleSubstance.trim()) return;
+
+    const startDate = new Date(scheduleStartDate);
+    if (isNaN(startDate.getTime())) return;
+
+    const totalDays = scheduleWeeksCount * 7;
+    const generatedDates: string[] = [];
+
+    if (scheduleFrequency === 'daily') {
+      for (let i = 0; i < totalDays; i++) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + i);
+        generatedDates.push(d.toISOString().slice(0, 10));
+      }
+    } else if (scheduleFrequency === 'eod') {
+      for (let i = 0; i < totalDays; i += 2) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + i);
+        generatedDates.push(d.toISOString().slice(0, 10));
+      }
+    } else if (scheduleFrequency === 'e3d') {
+      for (let i = 0; i < totalDays; i += 3) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + i);
+        generatedDates.push(d.toISOString().slice(0, 10));
+      }
+    } else if (scheduleFrequency === 'e3.5d') {
+      let dayOffset = 0;
+      let flip = false;
+      while (dayOffset < totalDays) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + dayOffset);
+        generatedDates.push(d.toISOString().slice(0, 10));
+        dayOffset += flip ? 4 : 3;
+        flip = !flip;
+      }
+    } else if (scheduleFrequency === 'e7d') {
+      for (let i = 0; i < totalDays; i += 7) {
+        const d = new Date(startDate);
+        d.setDate(startDate.getDate() + i);
+        generatedDates.push(d.toISOString().slice(0, 10));
+      }
+    }
+
+    generatedDates.forEach(dateStr => {
+      onAddProtocolEntry({
+        date: dateStr,
+        substance: scheduleSubstance.trim(),
+        dosage: numDose,
+        unit: scheduleUnit,
+        route: scheduleRoute,
+        time: '08:00',
+        color: scheduleColor,
+        notes: `Harmonogram: ${scheduleWeeksCount} tyg.`
+      });
+    });
+
+    setScheduleSuccessMsg(`Pomyślnie dodano ${generatedDates.length} dawek do kalendarza!`);
+    setTimeout(() => {
+      setScheduleSuccessMsg(null);
+      setIsSchedulerModalOpen(false);
+    }, 1800);
+  };
+
+  // Month Statistics (KPIs)
+  const currentMonthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const monthStats = useMemo(() => {
+    const monthEntries = protocolEntries.filter(p => p.date.startsWith(currentMonthPrefix));
+    const dosesSummaryMap: Record<string, { total: number; unit: string }> = {};
+    monthEntries.forEach(e => {
+      const key = e.substance.split(' ')[0] || e.substance;
+      if (!dosesSummaryMap[key]) {
+        dosesSummaryMap[key] = { total: 0, unit: e.unit };
+      }
+      dosesSummaryMap[key].total += e.dosage;
+    });
+
+    const monthNotesCount = calendarNotes.filter(n => n.date.startsWith(currentMonthPrefix)).length;
+
+    let workoutsCount = 0;
+    calendarDays.forEach(d => {
+      if (d.isCurrentMonth) {
+        const wList = workoutsByDate.get(d.dateStr) || [];
+        workoutsCount += wList.length;
+      }
+    });
+
+    const monthWeights = bodyWeights
+      .filter(w => w.date.startsWith(currentMonthPrefix))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    let weightDiff: number | null = null;
+    if (monthWeights.length >= 2) {
+      weightDiff = Math.round((monthWeights[monthWeights.length - 1].weight - monthWeights[0].weight) * 10) / 10;
+    }
+
+    return {
+      totalEntries: monthEntries.length,
+      dosesSummaryMap,
+      monthNotesCount,
+      workoutsCount,
+      weightCount: monthWeights.length,
+      weightDiff,
+      firstWeight: monthWeights[0]?.weight,
+      lastWeight: monthWeights[monthWeights.length - 1]?.weight,
+    };
+  }, [protocolEntries, currentMonthPrefix, calendarNotes, calendarDays, workoutsByDate, bodyWeights]);
+
   // Filtered entries for doses log
   const filteredEntries = useMemo(() => {
     return [...protocolEntries]
@@ -448,12 +626,6 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
             <CalendarDays className="w-5 h-5 text-emerald-400" />
             <span>KALENDARZ ZDARZEŃ, ŚRODKÓW & NOTATEK DNIA</span>
           </div>
-          <h2 className="text-xl font-black text-white mt-1">
-            Centrum Kalendarza & Dziennik Dnia
-          </h2>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Wizualny kalendarz iniekcji, przypisywanie notatek i celów do dat, personalizowane kolory oraz pełna korelacja z wagą i obwodami.
-          </p>
         </div>
 
         {/* Quick KPI Stat Chips */}
@@ -544,57 +716,114 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
       {/* ======================================================== */}
       {activeTab === 'calendar' && (
         <div className="space-y-4">
-          {/* Smart Injections & Day Overview Strip */}
+          {/* Smart Injections, AI Intelligence & Day Overview Strip */}
           <div className="card-3d p-4 rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
             <div className="flex items-center gap-3.5">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                <Syringe className="w-5 h-5" />
+              <div className="w-11 h-11 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-inner">
+                <CalendarDays className="w-6 h-6" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-bold text-white uppercase tracking-wider">Ostatnia Zarejestrowana Dawka:</span>
-                  {filteredEntries.length > 0 ? (
-                    <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
-                      {filteredEntries[0].substance} ({filteredEntries[0].dosage} {filteredEntries[0].unit})
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">Status Dnia:</span>
+                  <span className="text-xs font-mono font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                    {selectedDateStr}
+                  </span>
+                  {filteredEntries.length > 0 && (
+                    <span className="text-xs text-slate-400">
+                      • Ostatnia dawka: <strong className="text-slate-200">{filteredEntries[0].substance}</strong> ({filteredEntries[0].dosage}{filteredEntries[0].unit})
                     </span>
-                  ) : (
-                    <span className="text-xs text-slate-500 italic">Brak zarejestrowanych dawek</span>
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  {filteredEntries.length > 0 ? (
-                    <>
-                      Data podania: <strong className="text-slate-200">{filteredEntries[0].date}</strong> {filteredEntries[0].time ? `o godz. ${filteredEntries[0].time}` : ''} • Wybrana data w kalendarzu: <strong className="text-emerald-400 font-mono">{selectedDateStr}</strong>
-                    </>
-                  ) : (
-                    <>
-                      Wybierz datę w kalendarzu poniżej, aby dodać pierwsze podanie lub notatkę. Wybrana data: <strong className="text-emerald-400 font-mono">{selectedDateStr}</strong>
-                    </>
-                  )}
+                  Miesiąc: <strong className="text-slate-200">{monthNames[month]} {year}</strong> • Wybierz dzień w kalendarzu, aby zarządzać dawkami, treningami i notatkami.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              {/* Gemini Pro AI Button */}
+              <button
+                type="button"
+                onClick={handleRunGeminiAnalysis}
+                className="px-3.5 py-2 rounded-xl text-xs font-black text-white bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 border border-purple-400/40 shadow-lg shadow-purple-950/40 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                title="Głęboka analiza cyklu i kalendarza z Gemini 3.8 Pro"
+              >
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                <span>Analiza Gemini Pro</span>
+              </button>
+
+              {/* Cycle Recurring Scheduler Button */}
+              <button
+                type="button"
+                onClick={() => setIsSchedulerModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Zaplanuj cykliczny harmonogram iniekcji (np. E3D, E3.5D, EOD)"
+              >
+                <CalendarRange className="w-4 h-4 text-emerald-400" />
+                <span>Harmonogram Cyklu</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleToday}
-                className="btn-3d-secondary px-3 py-1.5 rounded-xl text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                className="btn-3d-secondary px-3 py-2 rounded-xl text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
               >
                 <CalendarDays className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Dzisiaj</span>
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedDateStr(new Date().toISOString().split('T')[0]);
-                  setRightPanelMode('dose');
-                }}
-                className="btn-3d-emerald px-3.5 py-1.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Dodaj dawkę dzisiaj</span>
-              </button>
+            </div>
+          </div>
+
+          {/* Monthly Summary KPI Banner */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                <Syringe className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] text-slate-400 uppercase font-mono font-bold truncate">Iniekcje w {monthNames[month]}</div>
+                <div className="text-sm font-extrabold text-white font-mono">
+                  {monthStats.totalEntries} podań
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                <Dumbbell className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] text-slate-400 uppercase font-mono font-bold truncate">Treningi w miesiącu</div>
+                <div className="text-sm font-extrabold text-blue-300 font-mono">
+                  {monthStats.workoutsCount} sesji
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                <Scale className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] text-slate-400 uppercase font-mono font-bold truncate">Trend wagi ({monthNames[month]})</div>
+                <div className="text-sm font-extrabold font-mono text-sky-300">
+                  {monthStats.weightDiff !== null 
+                    ? `${monthStats.weightDiff > 0 ? '+' : ''}${monthStats.weightDiff} ${settings.unit}`
+                    : (monthStats.firstWeight ? `${monthStats.firstWeight} ${settings.unit}` : 'Brak')}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                <FileText className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] text-slate-400 uppercase font-mono font-bold truncate">Notatki & Cele</div>
+                <div className="text-sm font-extrabold text-amber-300 font-mono">
+                  {monthStats.monthNotesCount} wpisów
+                </div>
+              </div>
             </div>
           </div>
 
@@ -867,12 +1096,12 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
                   </div>
                 </div>
 
-                {/* Switcher Pills */}
+                {/* Switcher Tabs */}
                 <div className="flex items-center bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-xs">
                   <button
                     type="button"
                     onClick={() => setRightPanelMode('dose')}
-                    className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
                       rightPanelMode === 'dose'
                         ? 'bg-emerald-600 text-white shadow-xs'
                         : 'text-slate-400 hover:text-white'
@@ -883,13 +1112,24 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setRightPanelMode('note')}
-                    className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
                       rightPanelMode === 'note'
                         ? 'bg-amber-600 text-white shadow-xs'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
                     Notatka
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRightPanelMode('weight')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      rightPanelMode === 'weight'
+                        ? 'bg-sky-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Waga
                   </button>
                 </div>
               </div>
@@ -1166,6 +1406,59 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
                   >
                     <Bookmark className="w-4 h-4" />
                     <span>Zapisz Notatkę dla Daty</span>
+                  </button>
+                </form>
+              )}
+
+              {/* MODE 3: QUICK WEIGHT INPUT FOR DATE */}
+              {rightPanelMode === 'weight' && (
+                <form onSubmit={handleAddQuickWeight} className="space-y-3.5 animate-fadeIn">
+                  <div className="p-3 rounded-xl bg-sky-950/20 border border-sky-800/30 flex items-center justify-between text-xs">
+                    <span className="text-sky-300 font-bold flex items-center gap-1.5">
+                      <Scale className="w-4 h-4 text-sky-400" />
+                      <span>Pomiar wagi dla: {selectedDateStr}</span>
+                    </span>
+                    {selectedDateWeight && (
+                      <span className="font-mono font-bold text-white bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                        Zapisano: {selectedDateWeight.weight} {settings.unit}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                      Waga ciała ({settings.unit})
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={quickWeight}
+                      onChange={e => setQuickWeight(e.target.value)}
+                      placeholder={selectedDateWeight ? `${selectedDateWeight.weight}` : "np. 84.5"}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">
+                      Notatka do pomiaru (opcjonalnie)
+                    </label>
+                    <input
+                      type="text"
+                      value={quickWeightNotes}
+                      onChange={e => setQuickWeightNotes(e.target.value)}
+                      placeholder="np. Poranny pomiar na czczo..."
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-sky-950/40 transition-all cursor-pointer active:scale-98"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Zapisz Wagę dla Wybranego Dnia</span>
                   </button>
                 </form>
               )}
@@ -1711,6 +2004,301 @@ export const CycleProtocolView: React.FC<CycleProtocolViewProps> = ({
           protocolEntries={protocolEntries}
           theme={isDark ? 'dark' : 'light'}
         />
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL 1: INTELIGENTNA ANALIZA KALENDARZA GEMINI 3.8 PRO */}
+      {/* ======================================================== */}
+      {isAiModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-purple-950/60 via-slate-900 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-purple-900/30">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base text-white">Ekspert Kalendarza & Cyklu AI</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Gemini 3.8 Pro
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">Analiza stabilności stężeń, periodyzacji, regeneracji i badań krwi</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRunGeminiAnalysis}
+                  disabled={isAiAnalyzing}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer disabled:opacity-50"
+                  title="Odśwież analizę"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isAiAnalyzing ? 'animate-spin text-purple-400' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAiModalOpen(false)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
+              {isAiAnalyzing ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 animate-pulse">
+                    <Sparkles className="w-6 h-6 animate-spin" />
+                  </div>
+                  <h4 className="font-extrabold text-sm text-white">Analizowanie kalendarza przez Gemini Pro...</h4>
+                  <p className="text-slate-400 max-w-sm text-[11px]">
+                    Korelujemy historię iniekcji, objętość treningową z planu, dynamikę masy ciała oraz wpisy samopoczucia.
+                  </p>
+                </div>
+              ) : aiAnalysisResult ? (
+                <div className="space-y-4">
+                  {/* Generated Analysis Report */}
+                  <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 text-slate-200 leading-relaxed whitespace-pre-wrap font-sans text-xs">
+                    {aiAnalysisResult.analysis.replace(/```json[\s\S]*?```/, '').trim()}
+                  </div>
+
+                  {/* AI Suggestions with 1-click Add */}
+                  {aiAnalysisResult.suggestions && aiAnalysisResult.suggestions.length > 0 && (
+                    <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                      <h4 className="font-extrabold text-xs text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Sugerowane Zdarzenia do Kalendarza na Najbliższe Dni:</span>
+                      </h4>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {aiAnalysisResult.suggestions.map((sug, idx) => (
+                          <div
+                            key={idx}
+                            className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-col justify-between gap-2.5"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-mono font-bold text-emerald-400 text-[11px]">{sug.date}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-medium">
+                                  {sug.category}
+                                </span>
+                              </div>
+                              <h5 className="font-bold text-white text-xs">{sug.title}</h5>
+                              <p className="text-[11px] text-slate-400 mt-0.5">{sug.content}</p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAddCalendarNote?.({
+                                  date: sug.date,
+                                  title: sug.title,
+                                  content: sug.content,
+                                  category: sug.category as any,
+                                  color: sug.category === 'bloodwork' ? 'rose' : sug.category === 'recovery' ? 'purple' : 'emerald',
+                                  isImportant: true
+                                });
+                              }}
+                              className="w-full py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Dodaj do Kalendarza ({sug.date})</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                    <span>Model: {aiAnalysisResult.model}</span>
+                    <span>Wygenerowano: {new Date(aiAnalysisResult.timestamp).toLocaleTimeString('pl-PL')}</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsAiModalOpen(false)}
+                className="btn-3d-secondary px-4 py-2 rounded-xl text-xs font-bold text-slate-300 cursor-pointer"
+              >
+                Zamknij panel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL 2: GENERATOR CYKLICZNEGO HARMONOGRAMU DAWEK */}
+      {/* ======================================================== */}
+      {isSchedulerModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-950/60 via-slate-900 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white shadow-lg shadow-emerald-900/30">
+                  <CalendarRange className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-white">Generator Harmonogramu Dawek</h3>
+                  <p className="text-xs text-slate-400">Automatyczne rozplanowanie iniekcji na cały cykl (np. E3D / E3.5D)</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSchedulerModalOpen(false)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5 space-y-4 text-xs overflow-y-auto max-h-[75vh]">
+              {scheduleSuccessMsg ? (
+                <div className="p-4 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold text-center flex items-center justify-center gap-2">
+                  <CheckCheck className="w-5 h-5 text-emerald-400" />
+                  <span>{scheduleSuccessMsg}</span>
+                </div>
+              ) : null}
+
+              {/* Szybkie Szablony */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-1.5">
+                  Wybierz związek lub gotowy preset:
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PRESET_PROTOCOLS.slice(0, 5).map(p => (
+                    <button
+                      key={p.badge}
+                      type="button"
+                      onClick={() => {
+                        setScheduleSubstance(p.name);
+                        setScheduleDosage(String(p.dosage));
+                        setScheduleUnit(p.unit as any);
+                        setScheduleRoute(p.route);
+                        setScheduleColor(p.color);
+                      }}
+                      className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 cursor-pointer"
+                    >
+                      {p.badge}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 block mb-1">Nazwa Związku</label>
+                  <input
+                    type="text"
+                    value={scheduleSubstance}
+                    onChange={e => setScheduleSubstance(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">Dawka</label>
+                    <input
+                      type="number"
+                      value={scheduleDosage}
+                      onChange={e => setScheduleDosage(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 block mb-1">Jedn.</label>
+                    <select
+                      value={scheduleUnit}
+                      onChange={e => setScheduleUnit(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="mg">mg</option>
+                      <option value="IU">IU</option>
+                      <option value="mcg">mcg</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 block mb-1">Częstotliwość podawania</label>
+                  <select
+                    value={scheduleFrequency}
+                    onChange={e => setScheduleFrequency(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="e3.5d">Co 3.5 dnia (np. Pon / Czw)</option>
+                    <option value="e3d">Co 3 dni (E3D)</option>
+                    <option value="eod">Co 2 dni (EOD)</option>
+                    <option value="daily">Codziennie (ED)</option>
+                    <option value="e7d">Raz w tygodniu (E7D)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 block mb-1">Czas trwania</label>
+                  <select
+                    value={scheduleWeeksCount}
+                    onChange={e => setScheduleWeeksCount(parseInt(e.target.value, 10))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value={4}>4 tygodnie (1 miesiąc)</option>
+                    <option value={8}>8 tygodni (2 miesiące)</option>
+                    <option value={12}>12 tygodni (3 miesiące)</option>
+                    <option value={16}>16 tygodni (4 miesiące)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-400 block mb-1">Data pierwszej dawki (Start)</label>
+                <input
+                  type="date"
+                  value={scheduleStartDate}
+                  onChange={e => setScheduleStartDate(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Informacja podsumowująca */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                Planujesz podanie: <strong className="text-emerald-400">{scheduleSubstance}</strong> w dawce <strong className="text-emerald-400">{scheduleDosage} {scheduleUnit}</strong> przez okres <strong className="text-white">{scheduleWeeksCount} tygodni</strong>. Wszystkie daty zostaną automatycznie oznaczone w kalendarzu.
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsSchedulerModalOpen(false)}
+                className="btn-3d-secondary px-4 py-2 rounded-xl text-xs font-bold text-slate-300 cursor-pointer"
+              >
+                Anuluj
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSchedule}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950/40 cursor-pointer active:scale-95"
+              >
+                <Check className="w-4 h-4" />
+                <span>Wygeneruj w Kalendarzu</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
