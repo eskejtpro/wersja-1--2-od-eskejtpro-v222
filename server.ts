@@ -951,6 +951,7 @@ Zadanie:
         bodyPartMeasurements = [],
         weeks = [],
         currentMonth = '',
+        hydrationHistory = {},
       } = req.body || {};
       const ai = getAi();
 
@@ -1001,21 +1002,35 @@ ZADANIE:
 \`\`\``;
 
       let responseText = '';
-      let usedModel = 'gemini-3.8-flash';
+      let usedModel = 'gemini-3.1-pro-preview';
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-3.1-pro-preview',
           contents: prompt,
           config: {
-            systemInstruction: 'Jesteś elitarnym fizjologiem i architektem periodyzacji sportów siłowych. Udzielasz bezkompromisowo precyzyjnych, popartych nauką i bezpiecznych wskazówek dotyczących optymalizacji kalendarza treningowo-suplementacyjnego.',
-            temperature: 0.4,
+            systemInstruction: 'Jesteś elitarnym fizjologiem i architektem periodyzacji sportów siłowych. Udzielasz bezkompromisowo precyzyjnych, popartych nauką i bezpiecznych wskazówek dotyczących optymalizacji kalendarza treningowo-suplementacyjnego, regeneracji i nawodnienia.',
+            temperature: 0.3,
           }
         });
         responseText = response.text || '';
-      } catch (errAi) {
-        console.warn('[server] Gemini API spike/fallback do modelu lokalnego eksperckiego:', errAi);
-        usedModel = 'gemini_sports_heuristic';
-        responseText = `## Profesjonalna Analiza Periodyzacji i Kalendarza (Tryb Ekspercki)\n\n### 1. Podsumowanie Protokołu\n- Zarejestrowana liczba iniekcji/dawek: **${protocolEntries.length}**\n- Liczba wprowadzonych notatek: **${calendarNotes.length}**\n- Ostatnia zarejestrowana waga: **${bodyWeights.slice(-1)[0]?.weight || 'brak'} kg**\n\n### 2. Stabilność Stężeń & Bezpieczeństwo\n- **Równomierność dawek**: Utrzymuj ściśle zaplanowane interwały (np. poniedziałek rano / czwartek wieczór lub co 3 dni). Zapobiega to gwałtownym wahaniom estradiolu oraz prolaktyny.\n- **Korelacja z treningiem**: W dni najcięższych bojów siłowych (np. przysiady, martwy ciąg) unikaj iniekcji w pośladki lub czworogłowe bezpośrednio przed sesją z uwagi na bolesność iniekcyjną (PIP).\n\n### 3. Zalecany Harmonogram Badań Krwi\n- Zaleca się wykonanie profilu: **Morfologia pełna, Lipidogram (HDL/LDL/Trójglicerydy), Próby wątrobowe (ALT, AST, GGTP), Estradiol, Prolaktyna, Kreatynina/eGFR** w terminie 6-8 tygodni od wdrożenia protokołu.\n\n### 4. Wskazówki Regeneracyjne\n- Zapewnij min. 3.5 litra wody dziennie przy zwiększonej retencji wewnątrzkomórkowej.\n- Zadbaj o minimum 7.5-8 godzin snu w celu stabilizacji układu nerwowego (OUN).`;
+      } catch (errAiPro) {
+        console.warn('[server] Przełączanie z gemini-3.1-pro-preview na gemini-3.8-flash:', errAiPro?.message || errAiPro);
+        try {
+          usedModel = 'gemini-3.8-flash';
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: prompt,
+            config: {
+              systemInstruction: 'Jesteś elitarnym fizjologiem i architektem periodyzacji sportów siłowych.',
+              temperature: 0.4,
+            }
+          });
+          responseText = response.text || '';
+        } catch (errAi) {
+          console.warn('[server] Gemini API fallback do modelu lokalnego eksperckiego:', errAi);
+          usedModel = 'gemini_sports_heuristic';
+          responseText = `## Profesjonalna Analiza Periodyzacji i Kalendarza (Tryb Ekspercki)\n\n### 1. Podsumowanie Protokołu\n- Zarejestrowana liczba iniekcji/dawek: **${protocolEntries.length}**\n- Liczba wprowadzonych notatek: **${calendarNotes.length}**\n- Ostatnia zarejestrowana waga: **${bodyWeights.slice(-1)[0]?.weight || 'brak'} kg**\n\n### 2. Stabilność Stężeń & Bezpieczeństwo\n- **Równomierność dawek**: Utrzymuj ściśle zaplanowane interwały (np. poniedziałek rano / czwartek wieczór lub co 3 dni). Zapobiega to gwałtownym wahaniom estradiolu oraz prolaktyny.\n- **Korelacja z treningiem**: W dni najcięższych bojów siłowych (np. przysiady, martwy ciąg) unikaj iniekcji w pośladki lub czworogłowe bezpośrednio przed sesją z uwagi na bolesność iniekcyjną (PIP).\n\n### 3. Zalecany Harmonogram Badań Krwi\n- Zaleca się wykonanie profilu: **Morfologia pełna, Lipidogram (HDL/LDL/Trójglicerydy), Próby wątrobowe (ALT, AST, GGTP), Estradiol, Prolaktyna, Kreatynina/eGFR** w terminie 6-8 tygodni od wdrożenia protokołu.\n\n### 4. Wskazówki Regeneracyjne\n- Zapewnij min. 3.5 litra wody dziennie przy zwiększonej retencji wewnątrzkomórkowej.\n- Zadbaj o minimum 7.5-8 godzin snu w celu stabilizacji układu nerwowego (OUN).`;
+        }
       }
 
       let suggestions: any[] = [];

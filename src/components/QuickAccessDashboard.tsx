@@ -45,7 +45,9 @@ import {
   ListOrdered,
   PlusCircle,
   HelpCircle,
+  ChevronLeft,
   ChevronRight,
+  History,
   RefreshCw,
   Search,
   GripVertical,
@@ -57,8 +59,19 @@ import {
   QuickAccessWidgetConfig, 
   QuickAccessWidgetId, 
   Exercise, 
-  BodyWeightEntry 
+  BodyWeightEntry,
+  HydrationDayRecord
 } from '../types';
+import {
+  loadHydrationHistory,
+  logWaterIntake,
+  removeWaterEntry,
+  resetDayHydration,
+  getHydrationDay,
+  getRecentHydrationStats,
+  getTodayDateKey,
+  DEFAULT_DAILY_WATER_TARGET_ML
+} from '../utils/hydrationService';
 import { 
   DEFAULT_QUICK_ACCESS_WIDGETS, 
   AVAILABLE_WIDGET_CATALOG, 
@@ -138,15 +151,12 @@ export const QuickAccessDashboard: React.FC<QuickAccessDashboardProps> = ({
   const [intervalPhase, setIntervalPhase] = useState<'idle' | 'work' | 'rest'>('idle');
   const [intervalRemaining, setIntervalRemaining] = useState<number>(20);
 
-  // Quick Water Hydration state
-  const [waterMl, setWaterMl] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('gymtracker_water_today');
-      return saved ? parseInt(saved, 10) : 1250;
-    } catch {
-      return 1250;
-    }
-  });
+  // Quick Water Hydration state with full daily history and date selector
+  const [hydrationHistory, setHydrationHistory] = useState<Record<string, HydrationDayRecord>>(() => loadHydrationHistory());
+  const [selectedWaterDate, setSelectedWaterDate] = useState<string>(() => getTodayDateKey());
+  const [showHydrationHistoryPanel, setShowHydrationHistoryPanel] = useState<boolean>(false);
+  const [customWaterAmount, setCustomWaterAmount] = useState<string>('');
+  const [showCustomWaterInput, setShowCustomWaterInput] = useState<boolean>(false);
 
   // Quick Macro / Calories state
   const [todayCalories, setTodayCalories] = useState<number>(() => {
@@ -360,12 +370,40 @@ export const QuickAccessDashboard: React.FC<QuickAccessDashboardProps> = ({
     setTimerRemaining(timerSeconds);
   };
 
+  const currentWaterDay = getHydrationDay(hydrationHistory, selectedWaterDate);
+  const waterMl = currentWaterDay.totalMl;
+
   const handleAddWater = (amount: number) => {
-    const next = Math.max(0, waterMl + amount);
-    setWaterMl(next);
-    try {
-      localStorage.setItem('gymtracker_water_today', next.toString());
-    } catch {}
+    const { updatedHistory } = logWaterIntake(hydrationHistory, selectedWaterDate, amount);
+    setHydrationHistory(updatedHistory);
+  };
+
+  const handleRemoveWaterItem = (entryId: string) => {
+    const { updatedHistory } = removeWaterEntry(hydrationHistory, selectedWaterDate, entryId);
+    setHydrationHistory(updatedHistory);
+  };
+
+  const handleResetWaterDay = () => {
+    const { updatedHistory } = resetDayHydration(hydrationHistory, selectedWaterDate);
+    setHydrationHistory(updatedHistory);
+  };
+
+  const handlePrevWaterDate = () => {
+    const d = new Date(selectedWaterDate);
+    d.setDate(d.getDate() - 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setSelectedWaterDate(key);
+  };
+
+  const handleNextWaterDate = () => {
+    const d = new Date(selectedWaterDate);
+    d.setDate(d.getDate() + 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setSelectedWaterDate(key);
+  };
+
+  const handleTodayWaterDate = () => {
+    setSelectedWaterDate(getTodayDateKey());
   };
 
   const handleAddCalories = (amount: number) => {
@@ -1252,64 +1290,313 @@ export const QuickAccessDashboard: React.FC<QuickAccessDashboardProps> = ({
         );
       }
 
-      // 8. LICZNIK NAWODNIENIA (H₂O)
+      // 8. LICZNIK NAWODNIENIA (H₂O) Z PEŁNĄ HISTORIĄ DNIA
       case 'water_hydration': {
-        const targetWater = 3000;
+        const targetWater = currentWaterDay.targetMl || DEFAULT_DAILY_WATER_TARGET_ML;
         const pct = Math.min(100, Math.round((waterMl / targetWater) * 100));
+        const todayKey = getTodayDateKey();
+        const isSelectedToday = selectedWaterDate === todayKey;
+        const recentStats = getRecentHydrationStats(hydrationHistory, 7, selectedWaterDate);
+
+        // Formatowanie etykiety wybranej daty
+        let dateLabel = selectedWaterDate;
+        if (isSelectedToday) {
+          dateLabel = 'Dzisiaj';
+        } else {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+          if (selectedWaterDate === yKey) {
+            dateLabel = 'Wczoraj';
+          }
+        }
+
+        const handleCustomAdd = (e: React.FormEvent) => {
+          e.preventDefault();
+          const amount = parseInt(customWaterAmount, 10);
+          if (!isNaN(amount) && amount > 0) {
+            handleAddWater(amount);
+            setCustomWaterAmount('');
+            setShowCustomWaterInput(false);
+          }
+        };
 
         return (
           <>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-2.5">
-                <div className={`w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400`}>
-                  <Droplet className="w-4 h-4" />
+            {/* Top Bar: Title, Date Navigator & Actions */}
+            <div className="flex flex-col gap-2 pb-3 border-b border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                    <Droplet className="w-4 h-4 fill-cyan-400/20" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-white flex items-center gap-1.5">
+                      <span>{widget.title}</span>
+                      <span className="text-[10px] font-normal text-cyan-400 font-mono">({waterMl} / {targetWater} ml)</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Cel dnia: {(waterMl / 1000).toFixed(2)}L z {(targetWater / 1000).toFixed(1)}L ({pct}%)
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-sm font-black text-white">{widget.title}</h3>
-                  <p className="text-[11px] text-slate-400">{waterMl} ml / {targetWater} ml ({pct}%)</p>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowHydrationHistoryPanel(prev => !prev)}
+                    className={`p-1.5 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                      showHydrationHistoryPanel
+                        ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Przełącz podgląd historii ostatnich dni"
+                  >
+                    <History className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">7 dni</span>
+                  </button>
+
+                  {waterMl > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleResetWaterDay}
+                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-500 hover:text-rose-400 hover:border-rose-500/30 text-[11px] cursor-pointer transition-colors"
+                      title="Resetuj wpisy dla tego dnia"
+                    >
+                      Reset
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleAddWater(-waterMl)}
-                className="p-1 rounded-lg text-slate-500 hover:text-slate-300 text-[10px] cursor-pointer"
-                title="Resetuj dzień"
-              >
-                Reset
-              </button>
+              {/* Day Switcher */}
+              <div className="flex items-center justify-between bg-slate-950/70 p-1 rounded-xl border border-slate-800 text-xs">
+                <button
+                  type="button"
+                  onClick={handlePrevWaterDate}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Poprzedni dzień"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-200 font-mono text-[11px]">
+                    {dateLabel} {dateLabel !== selectedWaterDate ? `(${selectedWaterDate})` : ''}
+                  </span>
+                  {!isSelectedToday && (
+                    <button
+                      type="button"
+                      onClick={handleTodayWaterDate}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 font-bold transition-colors cursor-pointer"
+                    >
+                      Wróć do Dziś
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextWaterDate}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Następny dzień"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <div className="pt-3 space-y-2.5">
-              <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden border border-slate-800">
-                <div 
-                  className="h-full bg-blue-500 transition-all duration-300"
-                  style={{ width: `${pct}%` }}
-                />
+            {/* Content: Progress + Actions + Daily Log Timeline */}
+            <div className="pt-3 space-y-3">
+              {/* Progress Bar with Liquid Glow */}
+              <div className="space-y-1">
+                <div className="w-full h-2.5 rounded-full bg-slate-950 overflow-hidden border border-slate-800">
+                  <div 
+                    className="h-full bg-gradient-to-r from-blue-500 via-cyan-400 to-teal-400 transition-all duration-300 rounded-full"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
+                  <span>0 ml</span>
+                  <span className={pct >= 100 ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                    {pct >= 100 ? '✓ Cel osiągnięty!' : `${targetWater - waterMl} ml do celu`}
+                  </span>
+                  <span>{targetWater} ml</span>
+                </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-1.5">
+              {/* Quick Add Portion Buttons */}
+              <div className="grid grid-cols-4 gap-1.5">
                 <button
                   type="button"
                   onClick={() => handleAddWater(250)}
-                  className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-bold font-mono text-blue-300 cursor-pointer"
+                  className="p-2 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 text-center transition-all cursor-pointer group"
                 >
-                  +250ml
+                  <div className="text-[10px] text-slate-500 group-hover:text-cyan-400">Szklanka</div>
+                  <div className="text-xs font-black font-mono text-cyan-300">+250ml</div>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleAddWater(500)}
-                  className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-bold font-mono text-blue-300 cursor-pointer"
+                  className="p-2 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 text-center transition-all cursor-pointer group"
                 >
-                  +500ml
+                  <div className="text-[10px] text-slate-500 group-hover:text-cyan-400">Butelka</div>
+                  <div className="text-xs font-black font-mono text-cyan-300">+500ml</div>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleAddWater(750)}
-                  className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-bold font-mono text-blue-300 cursor-pointer"
+                  className="p-2 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 text-center transition-all cursor-pointer group"
                 >
-                  +750ml
+                  <div className="text-[10px] text-slate-500 group-hover:text-cyan-400">Shaker</div>
+                  <div className="text-xs font-black font-mono text-cyan-300">+750ml</div>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCustomWaterInput(prev => !prev)}
+                  className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                    showCustomWaterInput
+                      ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+                      : 'bg-slate-950 hover:bg-slate-800/80 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="text-[10px] text-slate-500">Inna ilość</div>
+                  <div className="text-xs font-black font-mono text-white">+ Własna</div>
+                </button>
+              </div>
+
+              {/* Custom Amount Input Form (toggleable) */}
+              {showCustomWaterInput && (
+                <form onSubmit={handleCustomAdd} className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-950 border border-slate-800">
+                  <input
+                    type="number"
+                    step="50"
+                    min="10"
+                    placeholder="Wpisz np. 350 ml"
+                    value={customWaterAmount}
+                    onChange={e => setCustomWaterAmount(e.target.value)}
+                    className="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-400"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs cursor-pointer"
+                  >
+                    Dodaj
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomWaterInput(false)}
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </form>
+              )}
+
+              {/* 7-Day History Chart Panel (toggleable) */}
+              {showHydrationHistoryPanel && (
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                      <History className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Historia ostatnich 7 dni</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-cyan-300">
+                      Śr: {(recentStats.averageMl / 1000).toFixed(2)}L / dzień
+                    </span>
+                  </div>
+
+                  {/* 7-day Mini Bars */}
+                  <div className="grid grid-cols-7 gap-1.5 items-end pt-2 pb-1">
+                    {recentStats.days.map(d => {
+                      const barHeight = Math.max(12, Math.min(100, Math.round((d.totalMl / (d.targetMl || 3000)) * 100)));
+                      const isCurrentSelected = d.date === selectedWaterDate;
+
+                      return (
+                        <button
+                          key={d.date}
+                          type="button"
+                          onClick={() => setSelectedWaterDate(d.date)}
+                          className={`flex flex-col items-center gap-1 group cursor-pointer transition-transform ${
+                            isCurrentSelected ? 'scale-105' : 'opacity-85 hover:opacity-100'
+                          }`}
+                          title={`${d.date}: ${d.totalMl} ml (${d.percent}%)`}
+                        >
+                          <div className="w-full h-16 bg-slate-900 rounded-md p-0.5 flex flex-col justify-end border border-slate-800">
+                            <div
+                              className={`w-full rounded-sm transition-all duration-300 ${
+                                d.isGoalMet 
+                                  ? 'bg-cyan-400 shadow-xs shadow-cyan-500/50' 
+                                  : d.totalMl > 0 
+                                  ? 'bg-blue-600' 
+                                  : 'bg-slate-800'
+                              }`}
+                              style={{ height: `${barHeight}%` }}
+                            />
+                          </div>
+                          <span className={`text-[9px] font-mono font-bold ${isCurrentSelected ? 'text-cyan-300' : 'text-slate-400'}`}>
+                            {d.dayLabel}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="text-[10px] text-slate-500 flex justify-between pt-1 border-t border-slate-900">
+                    <span>Cel osiągnięty: {recentStats.daysMetGoalCount} z 7 dni</span>
+                    <span>Kliknij dzień na wykresie, aby go wybrać</span>
+                  </div>
+                </div>
+              )}
+
+              {/* TIMELINE OF INTAKES IN SELECTED DAY */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 px-0.5">
+                  <span className="flex items-center gap-1">
+                    <Droplet className="w-3 h-3 text-cyan-400" />
+                    <span>Wpisy w wybranym dniu ({currentWaterDay.entries.length})</span>
+                  </span>
+                  <span className="text-[10px] font-mono text-cyan-400">
+                    Suma: {waterMl} ml
+                  </span>
+                </div>
+
+                {currentWaterDay.entries.length === 0 ? (
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 text-center text-xs text-slate-500">
+                    Brak wpisów dla tego dnia. Kliknij porcję powyżej, aby zapisać wypitą wodę!
+                  </div>
+                ) : (
+                  <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
+                    {currentWaterDay.entries.map((item, idx) => (
+                      <div
+                        key={item.id || idx}
+                        className="flex items-center justify-between p-2 rounded-xl bg-slate-950/80 border border-slate-800/80 hover:border-slate-700 transition-colors text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-cyan-400 font-mono text-[11px] font-bold">
+                            {item.time || '08:00'}
+                          </span>
+                          <span className="text-slate-300 font-mono font-extrabold">
+                            +{item.amountMl} ml
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            {item.amountMl <= 250 ? '💧 Szklanka' : item.amountMl <= 500 ? '🧴 Butelka' : item.amountMl <= 750 ? '🥤 Shaker' : '🚰 Bidon'}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveWaterItem(item.id)}
+                          className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          title="Usuń ten wpis wody"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </>

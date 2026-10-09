@@ -316,12 +316,28 @@ export interface AppUpdateState {
 export interface CalendarDayNote {
   id: string;
   date: string;
+  time?: string;
   title?: string;
   content: string;
   category?: 'general' | 'bloodwork' | 'supplement' | 'recovery' | 'goal' | 'warning' | 'training';
   color?: 'emerald' | 'cyan' | 'purple' | 'amber' | 'rose' | 'yellow' | 'blue' | 'slate';
   isImportant?: boolean;
+  isCompleted?: boolean;
   createdAt?: string;
+}
+
+export interface HydrationLogItem {
+  id: string;
+  time: string;
+  amountMl: number;
+  timestamp: number;
+}
+
+export interface HydrationDayRecord {
+  date: string;
+  totalMl: number;
+  targetMl: number;
+  entries: HydrationLogItem[];
 }
 
 export interface ProtocolEntry {
@@ -509,6 +525,7 @@ export interface GymData {
   syncConfig?: SyncServerConfig;
   syncLogs?: SyncLogEntry[];
   catalogExercises?: CatalogExercise[];
+  hydrationHistory?: Record<string, HydrationDayRecord>;
   activeSessionDraft?: ActiveSessionDraft | null;
   workoutSessionsHistory?: WorkoutSessionRecord[];
 }

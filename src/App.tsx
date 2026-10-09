@@ -1608,6 +1608,7 @@ export default function App() {
               onUpdateWeekStartDate={handleUpdateWeekStartDate}
               onAddWeekFromGap={handleAddWeekFromGap}
               onAddBodyWeight={handleAddBodyWeight}
+              onSelectView={setActiveView}
             />
           )}
 
