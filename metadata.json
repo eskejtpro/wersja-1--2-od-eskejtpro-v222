@@ -1,0 +1,8 @@
+{
+  "name": "Remix test plv4 eskejtpro",
+  "description": "Profesjonalna aplikacja treningowa na Androida (Xiaomi 14T): plany treningowe, progresja ciężaru, tonaż, pomiary sylwetki oraz offline-first.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
